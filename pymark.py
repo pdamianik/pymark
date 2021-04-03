@@ -7,23 +7,34 @@ from gi.repository import Gtk,Gdk
 
 from matplotlib.backends.backend_gtk3agg import FigureCanvasGTK3Agg as FigureCanvas
 from matplotlib.figure import Figure
+from matplotlib.ticker import FormatStrFormatter as MPLFormatter
 
 from typing import Union,Any,Optional,Tuple,List,Dict,Iterable
 from tests_base import Timing
 
 import timeit
+from statistics import mean
 
 from tests_base import TIMINGS
+
 version=sys.version_info.minor
-if(version>=10):
-	print("enabled py>=3.10 tests:")
+if version>=10:
+	print("enabled python>=3.10 tests:")
 	from tests_3_10 import timings_mod as tmod
 	tmod(TIMINGS)
 else:
-	print("disabled py>=3.10 tests:")
+	print("disabled python>=3.10 tests:")
 print(" - structural pattern matching")
-
 del version#we don't want this as a global variable
+
+#possible: 'posix', 'nt', 'os2', 'ce', 'java', and 'riscos'
+if os.name=="posix":
+	print("enabled posix-specific tests:")
+	from tests_posix import timings_mod as tmod
+	tmod(TIMINGS)
+else:
+	print("disabled posix-specific tests:")
+print(" - encryption (crypt library)")
 
 class Timer:
 	__slots__=["name","rounds","value","_stmt","_setup","_globals"]
@@ -39,6 +50,7 @@ class Timer:
 class Main:
 	going=False
 	iterc=5
+	bars=None
 	def __init__(self):
 		self.win=Gtk.Window()
 		self.win.connect("delete-event",Gtk.main_quit)
@@ -100,6 +112,21 @@ class Main:
 		if not upper:
 			while Gtk.events_pending():
 				Gtk.main_iteration_do(False)
+	def set_bars(self,cache:Dict[str,List[float]]):
+		names=tuple(cache.keys())
+		means=[]
+		errs=([],[])
+		for samples in cache.values():
+			m=mean(samples)
+			errs[0].append(m-min(samples))
+			errs[1].append(max(samples)-m)
+			means.append(m)
+		if self.bars:
+			self.ax.clear()
+		self.ax.xaxis.set_major_formatter(MPLFormatter("%0.2fµs"))
+		self.bars=self.ax.barh(names,means,xerr=errs,capsize=80/len(cache))
+		self.fig.tight_layout()
+		self.canvas.draw()
 	def _on_start(self,widget:Gtk.Button,event:Gdk.EventButton)->bool:
 		if self.going:
 			return True
@@ -109,20 +136,13 @@ class Main:
 		self.progr2.set_opacity(1)
 		self.set_progress(0,True)
 		self.set_progress(0,False)
-		self.ax.clear()
-		self.canvas.draw()
 		timings=TIMINGS[widget.get_label()]
-		names=[timing[0] for timing in timings]
-		vals=[0]*len(timings)
+		cache={timing[0]:[] for timing in timings}
 		iterc=self.iterc
 		for i in range(1,iterc+1):
-			_names,_vals=self.measure(timings)
-			for j in range(len(vals)):
-				vals[j]+=_vals[j]
-			self.ax.clear()
-			self.ax.barh(_names,[val/i for val in vals])
-			self.fig.tight_layout()
-			self.canvas.draw()
+			for name,val in zip(*self.measure(timings)):
+				cache[name].append(val)
+			self.set_bars(cache)
 			self.set_progress(i/iterc,True)
 		self.progr1.set_opacity(0)
 		self.progr2.set_opacity(0)
